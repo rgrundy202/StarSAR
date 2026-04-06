@@ -3,8 +3,9 @@
 
 
 
-function X = starlink_signal_gen(data)
-    signal_len = length(data);
+function X = starlink_signal_gen(filename, out_filename)
+    
+    
 
 %%%%%%%%%%%%%%%%%% Values Taken From Humphrey %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     N = 1024; 
@@ -20,24 +21,32 @@ function X = starlink_signal_gen(data)
     F_sigma = 250E6;
     F_g = 10E6;
     gutter_len = 4;
+    
 %%%%%%%%%%%%%%%%%%%%%% Environment Variables %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     oversample = 1;
     symbol_length = (N+N_g+gutter_len)*oversample;
     max_hex_4qam = 512;
     max_hex_16qam = 2048;
+    max_bytes_per_frame = 1024*(4*8+286*2)/8;
+    file_prop = dir(filename);
+
+    num_frames = ceil(file_prop.bytes/max_bytes_per_frame);
+    
+    data_file = fopen(filename);
+    output_file = fopen(out_filename, 'a');
+
+
 
 
     
-%%%%%%%%%%%%%%%%%% Generate NonFrame Specific Data %%%%%%%%%%%%%%%%%%%%%%%%
-    %% Cyclic Prefix (Guard)
-    % TODO - determine cyclic prefix modulation
-    guard = zeros(1, N_g);
-    
+%%%%%%%%%%%%%%%%%% Generate NonFrame Specific Data %%%%%%%%%%%%%%%%%%%%%%%% 
+  
+
     %% PSS (SDPSK) (i = 0)
-
-    N_block = 8; % Number of blocks in frame
+    
+    N_block = 8; % Number of blocks in symbol
     L = 128; % Length of block
-    pss_len = 8 * L + N_g;
+    pss_len = 8 * L;
     PSS_seq = zeros(1, pss_len); % Start signal frame array
 
     
@@ -62,14 +71,21 @@ function X = starlink_signal_gen(data)
 
     % Modulate base PSS signal
     inv_pss_sub = dpskmod(q_pss, M, rot);
-    PSS_seq(N_g+1:N_g + L) = inv_pss_sub;
+    PSS_seq(1:L) = inv_pss_sub;
 
     % Change rotation for last frames
     rot = 0;
     pss_sub = dpskmod(q_pss, M, rot);
     for i = 1:N_block-1
-        PSS_seq(N_g+i*L+1:N_g+(1+i)*L) = pss_sub;
+        PSS_seq(i*L+1:(1+i)*L) = pss_sub;
     end 
+    % Stretch out to match other frames
+    PSS = resample(PSS_seq, (symbol_length-N_g)*oversample, length(PSS_seq));
+
+    cyclic_pre = 
+    
+
+
     %% SSS (4QAM) (i = 1) 
     sss_fid = fopen('qsss.hex', 'r');
     sss_data = textscan(sss_fid, '%c');
@@ -96,7 +112,7 @@ function X = starlink_signal_gen(data)
     n_streams = N; % Number of subcarriers
     nullIdx = (N/2-1:N/2+2).'; % IDs of null carriers
     cplen = N_g;
-    nfft = n_streams+length(nullIdx); % length for fft. subs x 
+    nfft = (n_streams+length(nullIdx))*oversample; % length for fft. subs x 
     
 
     % 4QAM modulation
@@ -125,20 +141,43 @@ function X = starlink_signal_gen(data)
     % Translate to binary
     head_bin = dec2bin(hex2dec(head_hex));
     head = zeros(1, 6*max_hex_4qam);
-    length(q_sss_hex);
+
     % Convert to base 4
     for i = 1:2*L
         head(i)= 2*str2double(head_bin(2*i-1)) + str2double(head_bin(2*i));
     end
+
+    % Reshape for OFDM encoding splitting data up by column
     head = reshape(head, [N, head_symbols]);
-    size(head)
-
-
-
+    
+    
+    M = 4;
+    
+    nSym = 3; % Number of symbols in frame
+    n_streams = N; % Number of subcarriers
+    nullIdx = (N/2-1:N/2+2).'; % IDs of null carriers
+    cplen = N_g;
+    nfft = (n_streams+length(nullIdx)); % length for fft. subs x 
     
 
+    % 4QAM modulation
+    qamSig = qammod(head, M);
+    
+    
+    % Duplicate into all channels
+    ofdm_input = qamSig;
+    
+    % OFDM encode (output is nfft x oversampling)
+    ofdm_output = ofdmmod(ofdm_input, nfft, cplen, nullIdx, OversamplingFactor=oversample);
+    
+    if length(ofdm_output) ~= symbol_length*head_symbols
+        error("Bad Header Length")
+    end
+
     %% Data
+    
     % 16QAM(i = 6-12)
+
 
     % 4QAM (i = 13-299)
     
@@ -153,44 +192,4 @@ end
 
 
 
-function hexArray = file_to_array(filename)
-    % Read hex file and convert to numeric array
-    % Supports space-separated, newline-separated, or continuous hex strings
-    
-    %Read the file as text
-    fid = fopen(filename, 'r');
-    if fid == -1
-        error('Could not open file: %s', filename);
-    end
-    raw = fread(fid, '*char')';
-    fclose(fid);
-    if regexp(filename, "\.hex$", 'once')
-        %Strip whitespace and newlines, split into hex byte tokens
-        raw = strrep(raw, sprintf('\n'), ' ');
-        raw = strrep(raw, sprintf('\r'), ' ');
-        tokens = strsplit(strtrim(raw));
-        tokens = tokens(~cellfun('isempty', tokens));  % remove empty entries
-        
-        %Handle both "AB CD EF" and continuous "ABCDEF" formats
-        if isscalar(tokens)
-            % Continuous string - split into 2-char chunks
-            s = tokens{1};
-            if mod(length(s), 2) ~= 0
-            error('Hex string has odd length - cannot split into bytes');
-            end
-            tokens = arrayfun(@(i) s(i:i+1), 1:length(s), 'UniformOutput', false);
-        end
-        hexArray = cellstr(blanks(length(tokens)*2));
-        for i = 1:length(tokens)
-            hexArray{2*i-1} = tokens{i}(1);
-            hexArray{2*i} = tokens{i}(2);
-        end
-
-    else
-        %Convert each byte to a 2-char hex string
-        hexArray = arrayfun(@(b) dec2hex(b), raw, 'UniformOutput', false);
-    end
-end
-
-sat_frame_builder(1)
 

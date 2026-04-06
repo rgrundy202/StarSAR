@@ -1,1 +1,1 @@
-starlink_signal_gen(1)
+starlink_signal_gen('faust.txt', 'output.data')
