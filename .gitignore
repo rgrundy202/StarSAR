@@ -2,3 +2,10 @@
 Notes/.DS_Store
 /Notes
 *.docx
+faust.txt
+output.data
+sat_frame_32768bits.hex
+starlink_signal_gen.asv
+test.asv
+*.asv
+*.asv

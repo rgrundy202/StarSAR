@@ -1,12 +1,8 @@
 %% StarLink Signal Generation Script
 % Taken from research done on Humphrey et al. (2023)
 
-
-
 function X = starlink_signal_gen(filename, out_filename)
     
-    
-
 %%%%%%%%%%%%%%%%%% Values Taken From Humphrey %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     N = 1024; 
     N_g = 32;
@@ -21,26 +17,31 @@ function X = starlink_signal_gen(filename, out_filename)
     F_sigma = 250E6;
     F_g = 10E6;
     gutter_len = 4;
+    F_s= 240E6;
     
 %%%%%%%%%%%%%%%%%%%%%% Environment Variables %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    oversample = 1;
+    oversample = 5;
     symbol_length = (N+N_g+gutter_len)*oversample;
     max_hex_4qam = 512;
-    max_hex_16qam = 2048;
+    max_hex_16qam = 1024;
     max_bytes_per_frame = 1024*(4*8+286*2)/8;
     file_prop = dir(filename);
-
+    n_streams = N; % Number of subcarriers
+    nullIdx = (N/2+1:N/2+4).'; % IDs of null carriers
+    cplen = N_g;
+    nfft = n_streams+gutter_len; % length for fft. 
     num_frames = ceil(file_prop.bytes/max_bytes_per_frame);
     
     data_file = fopen(filename);
-    output_file = fopen(out_filename, 'a');
+    output_file = fopen(out_filename, 'w');
+    fprintf("Generating Signal File For %s.\n%d Frames of Data\n", filename, num_frames)
 
 
 
-
+for h = 1:num_frames
     
-%%%%%%%%%%%%%%%%%% Generate NonFrame Specific Data %%%%%%%%%%%%%%%%%%%%%%%% 
-  
+%%%%%%%%%%%%%%%%%%%%%%%% Generate Data %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+    frame_start = ftell(output_file);
 
     %% PSS (SDPSK) (i = 0)
     
@@ -48,15 +49,14 @@ function X = starlink_signal_gen(filename, out_filename)
     L = 128; % Length of block
     pss_len = 8 * L;
     PSS_seq = zeros(1, pss_len); % Start signal frame array
-
-    
     
     % Data in each repeated PSS signal
     q_pss = zeros(1,L);
 
     q_pss_hex = file_to_array("qpss.hex");
+
     if length(q_pss_hex) ~= 32
-        error("Bad PSS Length")
+        error("Bad PSS Length. Expected: 32 \nGot: %d\n", length(q_pss_hex))
     end
 
     q_pss_hex = dec2bin(hex2dec(q_pss_hex));
@@ -79,17 +79,26 @@ function X = starlink_signal_gen(filename, out_filename)
     for i = 1:N_block-1
         PSS_seq(i*L+1:(1+i)*L) = pss_sub;
     end 
+    % Save cyclic prefix
+    cyclic_pre = q_pss(length(q_pss)- N_g+1:length(q_pss));
+    % Change rotation back for inversion
+    rot = pi;
+    mod_prefix = dpskmod(cyclic_pre, M, rot);
+    PSS_seq = [mod_prefix, PSS_seq];
+    
     % Stretch out to match other frames
-    PSS = resample(PSS_seq, (symbol_length-N_g)*oversample, length(PSS_seq));
-
-    cyclic_pre = 
+    PSS = resample(PSS_seq, (symbol_length), length(PSS_seq));
+    fprintf("PSS Sequence Length: %d \n", length(PSS));
+    fwrite(output_file, [real(PSS), imag(PSS)], 'double');
     
 
-
     %% SSS (4QAM) (i = 1) 
+
+    % Read data from file
     sss_fid = fopen('qsss.hex', 'r');
     sss_data = textscan(sss_fid, '%c');
     fclose(sss_fid);
+
     q_sss = zeros(1, N);
     q_sss_hex = sss_data{1};
     L = length(q_sss_hex);
@@ -110,32 +119,36 @@ function X = starlink_signal_gen(filename, out_filename)
     
     nSym = 1; % Number of symbols in frame
     n_streams = N; % Number of subcarriers
-    nullIdx = (N/2-1:N/2+2).'; % IDs of null carriers
-    cplen = N_g;
-    nfft = (n_streams+length(nullIdx))*oversample; % length for fft. subs x 
-    
 
     % 4QAM modulation
     qamSig = qammod(q_sss, M);
+
+    % Rotate 90 degrees to line up with observations
+    qamSig = qamSig * exp(1j * pi/4);
     
     % Duplicate into all channels
     ofdm_input = qamSig .';
     
     % OFDM encode (output is nfft x oversampling)
     ofdm_output = ofdmmod(ofdm_input, nfft, cplen, nullIdx, OversamplingFactor=oversample);
-    
     if length(ofdm_output) ~= symbol_length
         error("Bad SSS Symbol Length")
     end
 
+    fwrite(output_file, [real(ofdm_output), imag(ofdm_output)], 'double');
+
+    fprintf("SSS Sequence Length: %d\n", length(ofdm_output));
+
     %% Header (i = 2-5) 4QAM
     % Sequentially parse data from file into array representing frame data
     head_hex = file_to_array("header.txt");
+
     L = length(head_hex);
     if L ~= 3*max_hex_4qam
         error('Bad Header Length \nHeader Length: %d. \nExpected: %d', L, 3*max_hex_4qam)
     end
     
+
     head_symbols = L/max_hex_4qam;
 
     % Translate to binary
@@ -149,45 +162,94 @@ function X = starlink_signal_gen(filename, out_filename)
 
     % Reshape for OFDM encoding splitting data up by column
     head = reshape(head, [N, head_symbols]);
-    
-    
     M = 4;
-    
-    nSym = 3; % Number of symbols in frame
-    n_streams = N; % Number of subcarriers
-    nullIdx = (N/2-1:N/2+2).'; % IDs of null carriers
-    cplen = N_g;
-    nfft = (n_streams+length(nullIdx)); % length for fft. subs x 
-    
 
     % 4QAM modulation
     qamSig = qammod(head, M);
-    
-    
+  
     % Duplicate into all channels
     ofdm_input = qamSig;
     
     % OFDM encode (output is nfft x oversampling)
     ofdm_output = ofdmmod(ofdm_input, nfft, cplen, nullIdx, OversamplingFactor=oversample);
-    
+     
     if length(ofdm_output) ~= symbol_length*head_symbols
         error("Bad Header Length")
     end
+    fwrite(output_file, [real(ofdm_output), imag(ofdm_output)], 'double');
+    fprintf("Header Sequence Length: %d\n", length(ofdm_output));
+    
+    figure(200)
+    sym_start = cplen*oversample + 1;
+    sym_end = sym_start + nfft*oversample - 1;
+    symbol = ofdm_output(sym_start:sym_end);
+    fftd = fftshift(fft(symbol, nfft*oversample));
+    f = linspace(-F_s/2, F_s/2, length(fftd));
+    plot(f, abs(fftd));
 
-    %% Data
+    %% Data Writing
     
     % 16QAM(i = 6-12)
+    M = 16;
+    nSym = 6; % Number of symbols in frame
+    data = fread(data_file, max_hex_16qam*nSym, "*ubit4");
+    data = qammod(data, M);
+    if length(data) < max_hex_16qam*nSym
+        data = resize(data, max_hex_16qam*nSym, FillValue=15);
+    end
+    ofdm_input = reshape(data, [N, nSym]);
+    ofdm_output = ofdmmod(ofdm_input, nfft, cplen, nullIdx, OversamplingFactor=oversample);
+    fwrite(output_file, [real(ofdm_output), imag(ofdm_output)], 'double');
 
-
-    % 4QAM (i = 13-299)
+    % 4QAM (i = 13-298)
+    M = 4;
+    nSym = 286; % Number of symbols in frame
+    data = fread(data_file, N*nSym, "*ubit2");
+    % Check is file is complete and then fill
+    if length(data) < nSym*n_streams
+        fprintf('Incomplete Frame. Only %d read, Filling with 0xFF\n', length(data))
+        data = resize(data, nSym*n_streams, FillValue=3);
+    end
+    data = qammod(data, M);
     
-    %% Synchronization
-    % CM1SS (i = 300)
+    ofdm_input = reshape(data, [N, nSym]);
+    ofdm_output = ofdmmod(ofdm_input, nfft, cplen, nullIdx, OversamplingFactor=oversample);
+    fwrite(output_file, [real(ofdm_output), imag(ofdm_output)], 'double');
+    fprintf("Data Sequence Length: %d\n", length(ofdm_output));
 
-    % CSS (i = 301)
+    %% Synchronization pt 2
+    % CM1SS (i = 299)
+    M = 4;
+    data = randi([0 M-1], n_streams,1);
+    ofdm_input = qammod(data, M);
+    ofdm_output = ofdmmod(ofdm_input, nfft, cplen, nullIdx, OversamplingFactor=oversample);
+    fwrite(output_file, [real(ofdm_output), imag(ofdm_output)], 'double');
+    fprintf("CM1SS Sequence Length: %d\n", length(ofdm_output));
 
-    % Frequency Guard
+    % CSS (i = 300)
+    M = 4;
+    data = randi([0 M-1], n_streams, 1);
+    ofdm_input = qammod(data, M);
+    
+    ofdm_output = ofdmmod(ofdm_input, nfft, cplen, nullIdx, OversamplingFactor=oversample);
+    fwrite(output_file, [real(ofdm_output), imag(ofdm_output)], 'double');
+    fprintf("CSS Sequence Length: %d\n", length(ofdm_output));
+    
+    % Frequency Guard (i = 301)
+    data = zeros(1, symbol_length);
+    fwrite(output_file, [real(data), imag(data)], 'double');
+    fprintf("Guard Sequence Length: %d\n", length(data));
+
+    bytes_written = ftell(output_file) - frame_start;
+    fprintf("Frame %d Complete. %d Bytes Written\n",h, bytes_written);
+    
+
+end   
+    fclose('all');
+    
 end
+
+
 
 
 
