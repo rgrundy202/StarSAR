@@ -27,7 +27,7 @@ function X = starlink_signal_gen(filename, out_filename)
     max_bytes_per_frame = 1024*(4*8+286*2)/8;
     file_prop = dir(filename);
     n_streams = N; % Number of subcarriers
-    nullIdx = (N/2+1:N/2+4).'; % IDs of null carriers
+    nullIdx = (N/2-2:N/2+1).' % IDs of null carriers
     cplen = N_g;
     nfft = n_streams+gutter_len; % length for fft. 
     num_frames = ceil(file_prop.bytes/max_bytes_per_frame);
@@ -38,11 +38,10 @@ function X = starlink_signal_gen(filename, out_filename)
 
 
 
-for h = 1:num_frames
+
     
 %%%%%%%%%%%%%%%%%%%%%%%% Generate Data %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
-    frame_start = ftell(output_file);
-
+    
     %% PSS (SDPSK) (i = 0)
     
     N_block = 8; % Number of blocks in symbol
@@ -88,8 +87,7 @@ for h = 1:num_frames
     
     % Stretch out to match other frames
     PSS = resample(PSS_seq, (symbol_length), length(PSS_seq));
-    fprintf("PSS Sequence Length: %d \n", length(PSS));
-    fwrite(output_file, [real(PSS), imag(PSS)], 'double');
+    PSS = PSS/max(abs(PSS));
     
 
     %% SSS (4QAM) (i = 1) 
@@ -134,10 +132,8 @@ for h = 1:num_frames
     if length(ofdm_output) ~= symbol_length
         error("Bad SSS Symbol Length")
     end
-
-    fwrite(output_file, [real(ofdm_output), imag(ofdm_output)], 'double');
-
-    fprintf("SSS Sequence Length: %d\n", length(ofdm_output));
+    sss_ofdm_output = ofdm_output/max(abs(ofdm_output), [], 'all');
+    
 
     %% Header (i = 2-5) 4QAM
     % Sequentially parse data from file into array representing frame data
@@ -148,7 +144,6 @@ for h = 1:num_frames
         error('Bad Header Length \nHeader Length: %d. \nExpected: %d', L, 3*max_hex_4qam)
     end
     
-
     head_symbols = L/max_hex_4qam;
 
     % Translate to binary
@@ -176,77 +171,89 @@ for h = 1:num_frames
     if length(ofdm_output) ~= symbol_length*head_symbols
         error("Bad Header Length")
     end
-    fwrite(output_file, [real(ofdm_output), imag(ofdm_output)], 'double');
-    fprintf("Header Sequence Length: %d\n", length(ofdm_output));
-    
-    figure(200)
-    sym_start = cplen*oversample + 1;
-    sym_end = sym_start + nfft*oversample - 1;
-    symbol = ofdm_output(sym_start:sym_end);
-    fftd = fftshift(fft(symbol, nfft*oversample));
-    f = linspace(-F_s/2, F_s/2, length(fftd));
-    plot(f, abs(fftd));
 
-    %% Data Writing
-    
-    % 16QAM(i = 6-12)
-    M = 16;
-    nSym = 6; % Number of symbols in frame
-    data = fread(data_file, max_hex_16qam*nSym, "*ubit4");
-    data = qammod(data, M);
-    if length(data) < max_hex_16qam*nSym
-        data = resize(data, max_hex_16qam*nSym, FillValue=15);
-    end
-    ofdm_input = reshape(data, [N, nSym]);
-    ofdm_output = ofdmmod(ofdm_input, nfft, cplen, nullIdx, OversamplingFactor=oversample);
-    fwrite(output_file, [real(ofdm_output), imag(ofdm_output)], 'double');
+    head_ofdm_output = ofdm_output/max(abs(ofdm_output), [], 'all');
 
-    % 4QAM (i = 13-298)
-    M = 4;
-    nSym = 286; % Number of symbols in frame
-    data = fread(data_file, N*nSym, "*ubit2");
-    % Check is file is complete and then fill
-    if length(data) < nSym*n_streams
-        fprintf('Incomplete Frame. Only %d read, Filling with 0xFF\n', length(data))
-        data = resize(data, nSym*n_streams, FillValue=3);
-    end
-    data = qammod(data, M);
-    
-    ofdm_input = reshape(data, [N, nSym]);
-    ofdm_output = ofdmmod(ofdm_input, nfft, cplen, nullIdx, OversamplingFactor=oversample);
-    fwrite(output_file, [real(ofdm_output), imag(ofdm_output)], 'double');
-    fprintf("Data Sequence Length: %d\n", length(ofdm_output));
-
-    %% Synchronization pt 2
-    % CM1SS (i = 299)
-    M = 4;
-    data = randi([0 M-1], n_streams,1);
-    ofdm_input = qammod(data, M);
-    ofdm_output = ofdmmod(ofdm_input, nfft, cplen, nullIdx, OversamplingFactor=oversample);
-    fwrite(output_file, [real(ofdm_output), imag(ofdm_output)], 'double');
-    fprintf("CM1SS Sequence Length: %d\n", length(ofdm_output));
-
-    % CSS (i = 300)
-    M = 4;
-    data = randi([0 M-1], n_streams, 1);
-    ofdm_input = qammod(data, M);
-    
-    ofdm_output = ofdmmod(ofdm_input, nfft, cplen, nullIdx, OversamplingFactor=oversample);
-    fwrite(output_file, [real(ofdm_output), imag(ofdm_output)], 'double');
-    fprintf("CSS Sequence Length: %d\n", length(ofdm_output));
     
     % Frequency Guard (i = 301)
-    data = zeros(1, symbol_length);
-    fwrite(output_file, [real(data), imag(data)], 'double');
-    fprintf("Guard Sequence Length: %d\n", length(data));
-
-    bytes_written = ftell(output_file) - frame_start;
-    fprintf("Frame %d Complete. %d Bytes Written\n",h, bytes_written);
+    guard_data = zeros(1, symbol_length);
     
+    for frame = 1:num_frames
+        frame_start = ftell(output_file);
+        %% Synchronization Pt 1.
+        % PSS
+        fprintf("PSS Sequence Length: %d \n", length(PSS));
+        fwrite(output_file, [real(PSS), imag(PSS)], 'double');
+        % SSS
+        fwrite(output_file, [real(sss_ofdm_output), imag(sss_ofdm_output)], 'double');
+        fprintf("SSS Sequence Length: %d\n", length(sss_ofdm_output));
+        % Header
+        fwrite(output_file, [real(head_ofdm_output), imag(head_ofdm_output)], 'double');
+        fprintf("Header Sequence Length: %d\n", length(head_ofdm_output));
 
-end   
-    fclose('all');
+        %% Data Generation and Writing
     
+        % 16QAM(i = 6-12)
+        M = 16;
+        nSym = 6; % Number of symbols in frame
+        data = fread(data_file, max_hex_16qam*nSym, "*ubit4");
+        data = qammod(data, M);
+        if length(data) < max_hex_16qam*nSym
+            data = resize(data, max_hex_16qam*nSym, FillValue=15);
+        end
+        ofdm_input = reshape(data, [N, nSym]);
+        ofdm_output = ofdmmod(ofdm_input, nfft, cplen, nullIdx, OversamplingFactor=oversample);
+        ofdm_output = ofdm_output/max(abs(ofdm_output), [], 'all');
+        fwrite(output_file, [real(ofdm_output), imag(ofdm_output)], 'double');
+
+        % 4QAM (i = 13-298)
+        M = 4;
+        nSym = 286; % Number of symbols in frame
+        data = fread(data_file, N*nSym, "*ubit2");
+        % Check is file is complete and then fill
+        if length(data) < nSym*n_streams
+            fprintf('Incomplete Frame. Only %d read, Filling with 0xFF\n', length(data))
+            data = resize(data, nSym*n_streams, FillValue=3);
+        end
+        data = qammod(data, M);
+    
+        ofdm_input = reshape(data, [N, nSym]);
+        ofdm_output = ofdmmod(ofdm_input, nfft, cplen, nullIdx, OversamplingFactor=oversample);
+        ofdm_output = ofdm_output/max(abs(ofdm_output), [], 'all');
+        fwrite(output_file, [real(ofdm_output), imag(ofdm_output)], 'double');
+        fprintf("Data Sequence Length: %d\n", length(ofdm_output));
+
+        %% Synchronization pt 2
+        % CM1SS (i = 299)
+        M = 4;
+        data = randi([0 M-1], n_streams,1);
+        ofdm_input = qammod(data, M);
+        ofdm_output = ofdmmod(ofdm_input, nfft, cplen, nullIdx, OversamplingFactor=oversample);
+        % Normalized
+        ofdm_output = ofdm_output/max(abs(ofdm_output), [], 'all');
+    
+        fwrite(output_file, [real(ofdm_output), imag(ofdm_output)], 'double');
+        fprintf("CM1SS Sequence Length: %d\n", length(ofdm_output));
+
+        % CSS (i = 300)
+        M = 4;
+        data = randi([0 M-1], n_streams, 1);
+        ofdm_input = qammod(data, M);
+    
+        ofdm_output = ofdmmod(ofdm_input, nfft, cplen, nullIdx, OversamplingFactor=oversample);
+        % Normalized
+        ofdm_output = ofdm_output/max(abs(ofdm_output), [], 'all');
+        fwrite(output_file, [real(ofdm_output), imag(ofdm_output)], 'double');
+        fprintf("CSS Sequence Length: %d\n", length(ofdm_output));
+
+        %% Frequency Guard
+
+        fwrite(output_file, [real(guard_data), imag(guard_data)], 'double');
+        fprintf("Guard Sequence Length: %d\n", length(data));
+
+        bytes_written = ftell(output_file) - frame_start;
+        fprintf("Frame %d Complete. %d Bytes Written\n",frame, bytes_written);
+    end 
 end
 
 
