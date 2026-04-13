@@ -1,7 +1,7 @@
 %% StarLink Signal Generation Script
 % Taken from research done on Humphrey et al. (2023)
 
-function X = starlink_signal_gen(filename, out_filename)
+function [PSS, sss_ofdm_output, head_ofdm_output] = starlink_signal_gen(filename, out_filename, oversample)
     
 %%%%%%%%%%%%%%%%%% Values Taken From Humphrey %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     N = 1024; 
@@ -20,14 +20,14 @@ function X = starlink_signal_gen(filename, out_filename)
     F_s= 240E6;
     
 %%%%%%%%%%%%%%%%%%%%%% Environment Variables %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    oversample = 5;
+   
     symbol_length = (N+N_g+gutter_len)*oversample;
     max_hex_4qam = 512;
     max_hex_16qam = 1024;
     max_bytes_per_frame = 1024*(4*8+286*2)/8;
     file_prop = dir(filename);
     n_streams = N; % Number of subcarriers
-    nullIdx = (N/2-2:N/2+1).' % IDs of null carriers
+    nullIdx = (N/2-2:N/2+1).' ;% IDs of null carriers
     cplen = N_g;
     nfft = n_streams+gutter_len; % length for fft. 
     num_frames = ceil(file_prop.bytes/max_bytes_per_frame);
@@ -53,14 +53,22 @@ function X = starlink_signal_gen(filename, out_filename)
     q_pss = zeros(1,L);
 
     q_pss_hex = file_to_array("qpss.hex");
+    q_pss_hex = strjoin(q_pss_hex, '');  % collapse cell array to string
 
     if length(q_pss_hex) ~= 32
         error("Bad PSS Length. Expected: 32 \nGot: %d\n", length(q_pss_hex))
     end
 
-    q_pss_hex = dec2bin(hex2dec(q_pss_hex));
+    % q_pss_hex = dec2bin(hex2dec(q_pss_hex));
+    % for i = 1:L
+    %     q_pss(i)= str2double(q_pss_hex(i));
+    % end
+    q_pss_bin = '';
+    for i = 1:length(q_pss_hex)
+        q_pss_bin = [q_pss_bin, dec2bin(hex2dec(q_pss_hex(i)), 4)];
+    end
     for i = 1:L
-        q_pss(i)= str2double(q_pss_hex(i));
+        q_pss(i) = str2double(q_pss_bin(i));
     end
 
     % Symmetric DPSK (first is inverted so shift by pi)
@@ -75,19 +83,30 @@ function X = starlink_signal_gen(filename, out_filename)
     % Change rotation for last frames
     rot = 0;
     pss_sub = dpskmod(q_pss, M, rot);
+    
     for i = 1:N_block-1
         PSS_seq(i*L+1:(1+i)*L) = pss_sub;
+        
     end 
+    
     % Save cyclic prefix
     cyclic_pre = q_pss(length(q_pss)- N_g+1:length(q_pss));
     % Change rotation back for inversion
     rot = pi;
     mod_prefix = dpskmod(cyclic_pre, M, rot);
+
     PSS_seq = [mod_prefix, PSS_seq];
     
+    
+   
     % Stretch out to match other frames
     PSS = resample(PSS_seq, (symbol_length), length(PSS_seq));
+    % Normalize
     PSS = PSS/max(abs(PSS));
+    figure(1)
+    plot(abs(PSS))
+    
+    
     
 
     %% SSS (4QAM) (i = 1) 
@@ -132,7 +151,8 @@ function X = starlink_signal_gen(filename, out_filename)
     if length(ofdm_output) ~= symbol_length
         error("Bad SSS Symbol Length")
     end
-    sss_ofdm_output = ofdm_output/max(abs(ofdm_output), [], 'all');
+    
+    sss_ofdm_output = OFDMclipAndNorm(ofdm_output);
     
 
     %% Header (i = 2-5) 4QAM
@@ -172,7 +192,8 @@ function X = starlink_signal_gen(filename, out_filename)
         error("Bad Header Length")
     end
 
-    head_ofdm_output = ofdm_output/max(abs(ofdm_output), [], 'all');
+    head_ofdm_output = OFDMclipAndNorm(ofdm_output);
+    
 
     
     % Frequency Guard (i = 301)
@@ -183,12 +204,14 @@ function X = starlink_signal_gen(filename, out_filename)
         %% Synchronization Pt 1.
         % PSS
         fprintf("PSS Sequence Length: %d \n", length(PSS));
-        fwrite(output_file, [real(PSS), imag(PSS)], 'double');
+        write_iq(output_file, PSS);
+        fprintf("PSS non-zero elements: %d\n", nnz(PSS));
         % SSS
-        fwrite(output_file, [real(sss_ofdm_output), imag(sss_ofdm_output)], 'double');
+        write_iq(output_file, sss_ofdm_output);
         fprintf("SSS Sequence Length: %d\n", length(sss_ofdm_output));
+        fprintf("SSS non-zero elements: %d\n", nnz(sss_ofdm_output));
         % Header
-        fwrite(output_file, [real(head_ofdm_output), imag(head_ofdm_output)], 'double');
+        write_iq(output_file, head_ofdm_output);
         fprintf("Header Sequence Length: %d\n", length(head_ofdm_output));
 
         %% Data Generation and Writing
@@ -203,8 +226,8 @@ function X = starlink_signal_gen(filename, out_filename)
         end
         ofdm_input = reshape(data, [N, nSym]);
         ofdm_output = ofdmmod(ofdm_input, nfft, cplen, nullIdx, OversamplingFactor=oversample);
-        ofdm_output = ofdm_output/max(abs(ofdm_output), [], 'all');
-        fwrite(output_file, [real(ofdm_output), imag(ofdm_output)], 'double');
+        ofdm_output = OFDMclipAndNorm(ofdm_output);
+        write_iq(output_file, ofdm_output);
 
         % 4QAM (i = 13-298)
         M = 4;
@@ -219,8 +242,8 @@ function X = starlink_signal_gen(filename, out_filename)
     
         ofdm_input = reshape(data, [N, nSym]);
         ofdm_output = ofdmmod(ofdm_input, nfft, cplen, nullIdx, OversamplingFactor=oversample);
-        ofdm_output = ofdm_output/max(abs(ofdm_output), [], 'all');
-        fwrite(output_file, [real(ofdm_output), imag(ofdm_output)], 'double');
+        ofdm_output = OFDMclipAndNorm(ofdm_output);
+        write_iq(output_file, ofdm_output);
         fprintf("Data Sequence Length: %d\n", length(ofdm_output));
 
         %% Synchronization pt 2
@@ -230,9 +253,9 @@ function X = starlink_signal_gen(filename, out_filename)
         ofdm_input = qammod(data, M);
         ofdm_output = ofdmmod(ofdm_input, nfft, cplen, nullIdx, OversamplingFactor=oversample);
         % Normalized
-        ofdm_output = ofdm_output/max(abs(ofdm_output), [], 'all');
+        ofdm_output = OFDMclipAndNorm(ofdm_output);
     
-        fwrite(output_file, [real(ofdm_output), imag(ofdm_output)], 'double');
+        write_iq(output_file, ofdm_output);
         fprintf("CM1SS Sequence Length: %d\n", length(ofdm_output));
 
         % CSS (i = 300)
@@ -242,19 +265,20 @@ function X = starlink_signal_gen(filename, out_filename)
     
         ofdm_output = ofdmmod(ofdm_input, nfft, cplen, nullIdx, OversamplingFactor=oversample);
         % Normalized
-        ofdm_output = ofdm_output/max(abs(ofdm_output), [], 'all');
-        fwrite(output_file, [real(ofdm_output), imag(ofdm_output)], 'double');
+        ofdm_output = OFDMclipAndNorm(ofdm_output);
+        write_iq(output_file, ofdm_output);
         fprintf("CSS Sequence Length: %d\n", length(ofdm_output));
 
         %% Frequency Guard
 
-        fwrite(output_file, [real(guard_data), imag(guard_data)], 'double');
+        write_iq(output_file, guard_data);
         fprintf("Guard Sequence Length: %d\n", length(data));
 
         bytes_written = ftell(output_file) - frame_start;
         fprintf("Frame %d Complete. %d Bytes Written\n",frame, bytes_written);
     end 
 end
+
 
 
 
