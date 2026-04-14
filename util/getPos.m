@@ -26,8 +26,8 @@ function sat_struct = getPos(old_sat_struct, time)
     vy = velocity .* sin(phi) .* sin(theta);
     vz = velocity .* cos(phi);
 
-    sat_struct.pos = [x,y,z];
-    sat_struct.vel = [vx, vy, vz];
+    sat_struct.pos = [x;y;z];
+    sat_struct.vel = [vx;vy;vz];
     sat_struct.angular = sat_omega;
 end
 

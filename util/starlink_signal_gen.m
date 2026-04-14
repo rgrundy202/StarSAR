@@ -104,8 +104,7 @@ function [PSS, sss_ofdm_output, head_ofdm_output] = starlink_signal_gen(filename
     PSS = resample(PSS_seq, (symbol_length), length(PSS_seq));
     % Normalize
     PSS = PSS/max(abs(PSS));
-    figure(1)
-    plot(abs(PSS))
+   
     
     
     
