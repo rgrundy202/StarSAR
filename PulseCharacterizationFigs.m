@@ -111,12 +111,12 @@ xlabel("Delay Time (s)");
 ylabel("Doppler Shift (Hz)");
 
 figure(11)
-response = xcorr(data, sss);
+[response, lags] = xcorr(data, sss);
 time = linspace(-(T_f+T_sym)/2, (T_f+T_sym)/2, length(response));
 response = response/max(abs(response));
-response = db(response);
+response = mag2db(abs(response));
 response = max(response, -60);  % clamp to 60dB dynamic range
-plot(time, response)
+plot(lags/f_s, response)
 xlim([-T_sym, (T_f+T_sym)/2]);
 title("Matched Filter Response for SSS Sequence and Three Frame Signal")
 xlabel("Time (s)")

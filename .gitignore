@@ -12,3 +12,5 @@ test.asv
 *.asv
 test.m
 *.data
+
+*.mat

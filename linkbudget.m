@@ -1,71 +1,81 @@
+
+
 kB          = 1.38e-23;
-Tn          = 300;
-numPulses = 750;
-f_c = 10.7e9;
-prf = 1/750;
-c = 3*10^8;
-lambda = f_c/c;
-bw          = 250e6;
+Tn          = 290;
+f_c         = 10.7e9;
+c           = 3*10^8;
+lambda      = c/f_c;
+
+bw          = 240e6;
+
+f_s         = 2*bw;
+
 NF_lin      = 10^(1.4/10);
+
 L_lin       = 10^(6.0/10);
+
 Arx         = 1;
-R_orbit     = 1110e3;
-rcs_m2      = 10;
-PFD_dBWm2Hz = -182.02;
-PFD_lin     = 10^(PFD_dBWm2Hz/10);         % W/m²/Hz
+
+R_orbit     = 500e3;
+
+R_target    = 200;
+
+rcs_m2      = 0:2:100;
+
+EIRP        = 50;
+
+pri         = 1/750;
+
+prf         = 750;
+
+speed       = 7.62e3;
+
+
 
 % Total noise power over full bandwidth
 Pn_total    = kB * Tn * bw * NF_lin * L_lin;
 
-% Reference SNR (direct signal, no integration)
-SNR_ref     = (PFD_lin * bw * Arx) / Pn_total;
-fprintf('Reference SNR:     %.1f dB\n', 10*log10(SNR_ref));
-% Target: ~20 dB
+Grx_dB  = 17;                        % your gain in dB
+Grx_lin = db2pow(Grx_dB);
 
-% Echo SNR with coherent integration
-T_int       = numPulses / prf;
-Rrx         = 200;
+% Sig reference
+sig_ref = db2pow(EIRP) * (lambda^2/(4*pi)) / (4*pi*R_orbit^2) * Grx_lin;
 
-SNR_echo    = (PFD_lin * rcs_m2 * Arx * T_int) / ...
-              ((4*pi) * Rrx^2 * kB * Tn * NF_lin * L_lin);
-fprintf('Echo SNR @200m:    %.1f dB\n', 10*log10(SNR_echo));
+snr_ref = 10*log10(sig_ref/Pn_total);
 
-% Range sweep
-Rrx_vec     = logspace(1, 5, 1000);
-SNR_free    = zeros(size(Rrx_vec));
-SNR_tworay  = zeros(size(Rrx_vec));
+sig_target = sig_ref * rcs_m2./( 4 * pi * R_target.^2);
 
-for k = 1:length(Rrx_vec)
-    R = Rrx_vec(k);
-    SNR_free(k)   = 10*log10(...
-        (PFD_lin * rcs_m2 * Arx * T_int) / ...
-        ((4*pi) * R^2 * kB * Tn * NF_lin * L_lin));
-    
-    SNR_tworay(k) = 10*log10(...
-        (PFD_lin * rcs_m2 * Arx^2 * (4*pi) * T_int) / ...
-        (lambda^2 * R^4 * kB * Tn * NF_lin * L_lin));
-end
-
-% Detection ranges
-idx_free   = find(SNR_free   > 12, 1, 'last');
-idx_tworay = find(SNR_tworay > 12, 1, 'last');
-fprintf('Max range (air):   %.1f km\n', Rrx_vec(idx_free)/1e3);
-fprintf('Max range (gnd):   %.1f km\n', Rrx_vec(idx_tworay)/1e3);
-% Paper: ~10km air, ~4km ground
+snr_target =  10*log10(sig_target/Pn_total);
 
 
-% Print every term individually
-signal_W    = PFD_lin * bw * Arx;
-noise_W     = kB * Tn * bw * NF_lin * L_lin;
+N_sync      = round(f_s / (prf * 302));
+MF_gain_dB  = 10*log10(N_sync);
+fprintf('Range processing gain: %.1f dB\n', MF_gain_dB);
 
-fprintf('=== Term by Term ===\n');
-fprintf('PFD:           %.2f dBW/m²/Hz\n', 10*log10(PFD_lin));
-fprintf('BW:            %.1f dB\n',          10*log10(bw));
-fprintf('Arx:           %.1f dB\n',          10*log10(Arx));
-fprintf('Signal power:  %.1f dBW\n',         10*log10(signal_W));
-fprintf('kB:            %.1f dBW/Hz/K\n',    10*log10(kB));
-fprintf('Tn:            %.1f dBK\n',          10*log10(Tn));
-fprintf('NF:            %.1f dB\n',           10*log10(NF_lin));
-fprintf('L:             %.1f dB\n',           10*log10(L_lin));
-fprintf('Noise power:   %.1f dBW\n',         10*log10(noise_W));
-fprintf('SNR:           %.1f dB\n',          10*log10(signal_W/noise_W));
+beam_angle = (2.5/360)*2*pi;
+beamwid = 2*tan(beam_angle) * R_orbit;
+
+% Synthetic aperture length
+beamdwell   = beamwid / (speed);   % time target is in beam (s)
+N_az         = round(prf * beamdwell);       % number of pulses in aperture
+az_gain_dB   = 10*log10(N_az);
+fprintf('Azimuth processing gain: %.1f dB\n', az_gain_dB);
+
+total_gain_dB = MF_gain_dB + az_gain_dB;
+fprintf('Total SAR processing gain: %.1f dB\n', total_gain_dB);
+
+figure(1)
+plot(rcs_m2, snr_target);
+
+
+
+figure(2)
+SNR_postprocs = snr_target + total_gain_dB;
+semilogx(rcs_m2, SNR_postprocs);
+
+%calculate required rcs at 1.2 km
+
+
+
+
+

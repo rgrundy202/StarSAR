@@ -107,8 +107,7 @@ function [PSS, sss_ofdm_output, head_ofdm_output] = starlink_signal_gen(filename
    
     
     
-    
-
+  
     %% SSS (4QAM) (i = 1) 
 
     % Read data from file

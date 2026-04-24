@@ -7,10 +7,11 @@ function PlotScenario(txPlat,rxPlat,tgtPlat, time)
 %    - Target trajectory 
 
     % Setup theater plotter
-    earthRadius = 6371e3; 
-    max_r = earthRadius+600e3;
-    min_r = earthRadius - 2000;
-    tp = theaterPlot(XLim=[min_r max_r],YLim=[-100000 100000],ZLim=[0, 200]); 
+    % earthRadius = 6371e3; 
+    max_r = 600e3;
+    min_r = -10000;
+    max_r = 1.5*max(txPlat.Position);
+    tp = theaterPlot(XLim=[min_r max_r],YLim=[-20000 20000],ZLim=[0, 200]); 
     tpFig = tp.Parent.Parent;
     tpFig.Units = 'normalized'; 
     tpFig.Position = [0.1 0.1 0.8 0.8];
@@ -19,13 +20,13 @@ function PlotScenario(txPlat,rxPlat,tgtPlat, time)
     %   - Orientation plotters
     %   - Platform plotters
     %   - Trajectory plotters 
-    opTx = orientationPlotter(tp,...
-        LocalAxesLength=4e3,MarkerSize=1);
+    opTx = orientationPlotter(tp, 'DisplayName', 'Orientation',...
+        LocalAxesLength=1e3,MarkerSize=1);
     opRx = orientationPlotter(tp,...
-        LocalAxesLength=4e3,MarkerSize=1);
-    plotterTx = platformPlotter(tp,DisplayName='Transmitter',Marker='^',MarkerSize=2,MarkerFaceColor=[0 0.4470 0.7410],MarkerEdgeColor=[0 0.4470 0.7410]);
-    plotterRx = platformPlotter(tp,DisplayName='Receiver',Marker='v',MarkerSize=2,MarkerFaceColor=[0 0.4470 0.7410],MarkerEdgeColor=[0 0.4470 0.7410]);
-    plotterTgt = platformPlotter(tp,DisplayName='Target',Marker='o',MarkerSize=2,MarkerFaceColor=[0.8500 0.3250 0.0980],MarkerEdgeColor=[0.8500 0.3250 0.0980]);
+        LocalAxesLength=1e3,MarkerSize=1);
+    plotterTx = platformPlotter(tp,DisplayName='Transmitter',Marker='^',MarkerSize=5,MarkerFaceColor=[0 0.4470 0.7410],MarkerEdgeColor=[0 0.4470 0.7410]);
+    plotterRx = platformPlotter(tp,DisplayName='Receiver',Marker='v',MarkerSize=5,MarkerFaceColor=[0 0.4470 0.7410],MarkerEdgeColor=[0 0.4470 0.7410]);
+    plotterTgt = platformPlotter(tp,DisplayName='Target',Marker='o',MarkerSize=5,MarkerFaceColor=[0.8500 0.3250 0.0980],MarkerEdgeColor=[0.8500 0.3250 0.0980]);
     trajPlotter = trajectoryPlotter(tp,DisplayName='Transmitter Trajectory',LineWidth=3);
 
     % Plot transmitter and receiver orientations
