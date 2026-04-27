@@ -6,11 +6,10 @@ rng('default');
 delete 'ref_datacube.mat';
 delete 'sig_datacube.mat';
 debug = false;
-
 %% Parameters
 fc      = 10.7e9;
 bw      = 240e6;
-fs      = 2*bw;
+fs      = 256e6;
 prf     = 750;
 pri     = 1/prf;
 [lambda, c] = freq2wavelen(fc);
@@ -19,13 +18,14 @@ rxGain_dB = 21;
 gainTx  = 34.0;
 EIRP    = 45.1;
 peakPower = 10^((EIRP - gainTx)/10);
-rcsLinear = 10000;   % artificially high to force detection
-pulse_num = 100;
+rcsLinear = 10e8;   % artificially high to force detection
+pulse_num = 1000;
 
 %% Geometry
-r       = 5e3;                     % TX altitude (m)
+r       = 500e3;                     % TX altitude (m)
+velocity = 7500;
 tgt_distance = 200;
-txPos   = [r; 0; 0];
+txPos   = [-5000; 0; r];
 rxPos   = [0; 0; 0];
 tgtPos  = [0; tgt_distance; 0];
 
@@ -37,7 +37,7 @@ fprintf('TX-TGT range: %.1f m\n', norm(tgtPos - txPos));
 fprintf('RX-TGT range: %.1f m\n', norm(tgtPos - rxPos));
 
 %% Velocities (static for this test)
-txVel  = [0; 0; 0];
+txVel  = [velocity; 0; 0];
 rxVel  = [0; 0; 0];
 tgtVel = [0; 0; 0];
 
@@ -86,19 +86,10 @@ data = data(:);                      % column vector
 if ~isnumeric(data)
     error('Decoded data must be numeric samples (real or complex).');
 end
-figure(2)
+
 test_sig = data;
 sym_len = ceil(length(data)/302);
-SSS_sequence = data(sym_len:2*sym_len-1);
-SSS_sequence = SSS_sequence/max(abs(SSS_sequence));
-matched_ss = max(mag2db(abs(xcorr(SSS_sequence, data))), -20);
-subplot(2, 1, 1)
-datadb = mag2db(abs(xcorr(data)));
-plot(datadb)
-xlim([6.37e5, 6.43e5])
-subplot(2,1,2)
-plot(matched_ss);
-xlim([6.37e5, 6.43e5])
+
 
 
 % t_vec      = (0:numSamples-1).' / fs;
@@ -125,19 +116,43 @@ fs_direct = phased.FreeSpace(...
     'SampleRate', fs, ...
     'PropagationSpeed', c, ...
     'TwoWayPropagation', false);
-numSamples = pri*fs;
+numSamples = ceil(pri*fs);
 
 m_ref = matfile('ref_datacube.mat', 'Writable', true);
 m_ref.data(1,1:numSamples) = complex(zeros(1,numSamples));  % preallocate type
 m_sig = matfile('sig_datacube.mat', 'Writable', true);
 m_sig.data(1,1:numSamples) = complex(zeros(1,numSamples));  % preallocate type
+m_traj = matfile('traj_data.mat', 'Writable',true);
+m_traj.data(1,1:3) = zeros(1,3);
+
+% Precompute full waveform length needed
+samples_per_pulse = round(fs / prf);
+total_samples_needed = samples_per_pulse * pulse_num;
+
+% Make sure decoded data is long enough
+if length(data) < total_samples_needed
+    % Tile the data if needed
+    reps = ceil(total_samples_needed / length(data));
+    data = repmat(data, reps, 1);
+end
 
 
 
 
 
 for idx = 1:pulse_num
-    fprintf("Pulse Number: %d \n", idx);
+     if mod(idx,10)==0
+         fprintf("Pulse Number: %i\n", idx);
+     end
+     % Extract consecutive chunk for this pulse
+    start_idx = (idx-1) * samples_per_pulse + 1;
+    end_idx   = start_idx + samples_per_pulse - 1;
+    test_sig  = data(start_idx:end_idx);
+%% Update positions
+txPos = txPos + pri*txVel;
+rxPos = rxPos + pri*rxVel;
+tgtPos = tgtPos + pri*tgtVel;
+m_traj.data(idx, 1:3)= [txPos(1) txPos(2) txPos(3)];
 %% Step 1 - Transmit
 tx_out = transmitter(test_sig);
 
@@ -161,14 +176,14 @@ sig_collected = collector(sig_at_rx, aoa_tgt);
 %% Step 7 - Apply receiver
 sig_final = receiver_out(sig_collected).';
 
-m_sig.data(idx, 1:numSamples) = sig_final(1:numSamples);
+m_sig.data(idx, 1:samples_per_pulse) = sig_final(1:samples_per_pulse);
 
 %% Step 8 - Direct path reference
 [~, aod_rx] = rangeangle(rxPos, txPos, Rtx);
 tx_radiated_rx = radiator(tx_out, aod_rx);
 sig_direct = fs_direct(tx_radiated_rx, txPos, rxPos, txVel, rxVel).';
 
-m_ref.data(idx, 1:numSamples) = sig_direct(1:numSamples);  % write one row at a time
+m_ref.data(idx, 1:samples_per_pulse) = sig_direct(1:samples_per_pulse);  % write one row at a time
 
 
 
@@ -189,6 +204,30 @@ if debug
     fprintf('Step 7 - Final signal:           %.1f dBW\n', mag2db(rms(sig_final)));
     fprintf('\n=== Reference Channel ===\n');
 fprintf('Direct path signal at RX:        %.1f dBW\n', mag2db(rms(sig_direct)));
+fprintf('=== Geometry ===\n');
+fprintf('TX pos:  [%.1f, %.1f, %.1f] m\n', txPos);
+fprintf('RX pos:  [%.1f, %.1f, %.1f] m\n', rxPos);
+fprintf('TGT pos: [%.1f, %.1f, %.1f] m\n', tgtPos);
+fprintf('TX-TGT range: %.1f m\n', norm(tgtPos - txPos));
+fprintf('RX-TGT range: %.1f m\n', norm(tgtPos - rxPos));
+fprintf("TX-RX range: %.1f m\n", norm(txPos-rxPos));
+% Verify bistatic range geometry
+c = physconst('LightSpeed');
+txPos = [0; 0; 500e3];
+rxPos = [0; 0; 0];
+tgtPos = [0; 200; 0];
+
+R_tx_tgt = norm(tgtPos - txPos);
+R_rx_tgt = norm(tgtPos - rxPos);
+R_tx_rx  = norm(rxPos  - txPos);
+
+r_bistatic = R_tx_tgt + R_rx_tgt - R_tx_rx;
+
+fprintf('R_tx_tgt:    %.4f m\n', R_tx_tgt);
+fprintf('R_rx_tgt:    %.4f m\n', R_rx_tgt);
+fprintf('R_tx_rx:     %.4f m\n', R_tx_rx);
+fprintf('r_bistatic:  %.4f m\n', r_bistatic);
+fprintf('Expected peak at sample offset: %.1f\n', r_bistatic * fs/c);
 end
 
 end

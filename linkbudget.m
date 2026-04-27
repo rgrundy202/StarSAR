@@ -1,7 +1,7 @@
 
 
 kB          = 1.38e-23;
-Tn          = 290;
+Tn          = 300;
 f_c         = 10.7e9;
 c           = 3*10^8;
 lambda      = c/f_c;
@@ -18,11 +18,11 @@ Arx         = 1;
 
 R_orbit     = 500e3;
 
-R_target    = 200;
+R_target    = 1:1000;
 
-rcs_m2      = 0:2:100;
+rcs_m2      = 100;
 
-EIRP        = 50;
+EIRP        = 45;
 
 pri         = 1/750;
 
@@ -30,12 +30,14 @@ prf         = 750;
 
 speed       = 7.62e3;
 
+P_sig = db2pow(EIRP);
+
 
 
 % Total noise power over full bandwidth
-Pn_total    = kB * Tn * bw * NF_lin * L_lin;
+Pn_total    = kB * Tn * fs * NF_lin * L_lin;
 
-Grx_dB  = 17;                        % your gain in dB
+Grx_dB  = 20;                        % your gain in dB
 Grx_lin = db2pow(Grx_dB);
 
 % Sig reference
@@ -65,13 +67,22 @@ total_gain_dB = MF_gain_dB + az_gain_dB;
 fprintf('Total SAR processing gain: %.1f dB\n', total_gain_dB);
 
 figure(1)
-plot(rcs_m2, snr_target);
+semilogx(R_target, snr_target);
+xlabel("Range (m)");
+ylabel("SNR (dB)");
+title("Unprocessed SNR")
+hold on
+yline(12, ':', '12 dB', 'LineWidth', 1.5, 'LabelHorizontalAlignment', 'left', 'Color','red');
+hold off
 
 
 
 figure(2)
 SNR_postprocs = snr_target + total_gain_dB;
-semilogx(rcs_m2, SNR_postprocs);
+semilogx(R_target, SNR_postprocs);
+hold on
+yline(12, ':', '12 dB', 'LineWidth', 1.5, 'LabelHorizontalAlignment', 'left');
+hold off
 
 %calculate required rcs at 1.2 km
 
