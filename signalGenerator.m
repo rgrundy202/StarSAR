@@ -6,6 +6,7 @@ rng('default');
 delete 'ref_datacube.mat';
 delete 'sig_datacube.mat';
 debug = false;
+direct_interference = false;
 %% Parameters
 fc      = 10.7e9;
 bw      = 240e6;
@@ -18,28 +19,38 @@ rxGain_dB = 21;
 gainTx  = 34.0;
 EIRP    = 45.1;
 peakPower = 10^((EIRP - gainTx)/10);
-rcsLinear = 10e8;   % artificially high to force detection
-pulse_num = 1000;
+rcsLinear = [10e6, 10e6, 10e6];   % artificially high to force detection
+pulse_num = 100;
 
 %% Geometry
 r       = 500e3;                     % TX altitude (m)
 velocity = 7500;
 tgt_distance = 200;
-txPos   = [-5000; 0; r];
+txPos   = [-25000; 0; r];
 rxPos   = [0; 0; 0];
-tgtPos  = [0; tgt_distance; 0];
+tgtPos1  = [0; tgt_distance; 0];
+tgtPos2  = [0; tgt_distance+100; 0];
+tgtPos3  = [0; tgt_distance+200; 0];
+allTgtPos = [tgtPos1, tgtPos2, tgtPos3];
 
 fprintf('=== Geometry ===\n');
+
 fprintf('TX pos:  [%.1f, %.1f, %.1f] m\n', txPos);
 fprintf('RX pos:  [%.1f, %.1f, %.1f] m\n', rxPos);
-fprintf('TGT pos: [%.1f, %.1f, %.1f] m\n', tgtPos);
-fprintf('TX-TGT range: %.1f m\n', norm(tgtPos - txPos));
-fprintf('RX-TGT range: %.1f m\n', norm(tgtPos - rxPos));
+for idx = 1:size(allTgtPos,2)
+    tgtPos = allTgtPos(:,idx);
+    fprintf('TGT pos: [%.1f, %.1f, %.1f] m\n', tgtPos);
+    fprintf('TX-TGT range: %.1f m\n', norm(tgtPos - txPos));
+    fprintf('RX-TGT range: %.1f m\n', norm(tgtPos - rxPos));
+end
 
 %% Velocities (static for this test)
 txVel  = [velocity; 0; 0];
 rxVel  = [0; 0; 0];
-tgtVel = [0; 0; 0];
+tgtVel1 = [0; 0; 0];
+tgtVel2 = [0; 0; 0];
+tgtVel3 = [0; 0; 0];
+tgtVels = [tgtVel1, tgtVel2, tgtVel3];
 
 %% Platform orientations
 % TX points nadir (-Z)
@@ -65,7 +76,6 @@ transmitter  = phased.Transmitter(PeakPower=peakPower, Gain=gainTx, LossFactor=0
 receiver_out = phased.Receiver(Gain=rxGain_dB, SampleRate=fs, NoiseFigure=rx_Nf, SeedSource='Property');
 
 %% Generate test waveform (simple complex sinusoid for testing)
-numSamples = round(fs * pri);
 data = decode_starlink_signal('output.data');
 fs_data = fs * length(data) / round(fs*pri*3);  % ≈ 15x fs
 fprintf('Estimated data sample rate: %.3f MHz\n', fs_data/1e6);
@@ -90,51 +100,58 @@ end
 test_sig = data;
 sym_len = ceil(length(data)/302);
 
-
-
-% t_vec      = (0:numSamples-1).' / fs;
-% test_sig   = exp(1j * 2*pi * 1e6 * t_vec);   % 1 MHz tone
-% fprintf('\n=== Waveform ===\n');
-% fprintf('Samples: %d\n', numSamples);
-% fprintf('Waveform power: %.1f dB\n', mag2db(rms(test_sig)));
-
 %% Freespace objects
-fs_tx_tgt = phased.FreeSpace(...
-    'OperatingFrequency', fc, ...
-    'SampleRate', fs, ...
-    'PropagationSpeed', c, ...
-    'TwoWayPropagation', false);
 
-fs_tgt_rx = phased.FreeSpace(...
-    'OperatingFrequency', fc, ...
-    'SampleRate', fs, ...
-    'PropagationSpeed', c, ...
-    'TwoWayPropagation', false);
+
+fs_tx_tgt = phased.FreeSpace(...
+        'OperatingFrequency', fc, ...
+        'SampleRate', fs, ...
+        'PropagationSpeed', c, ...
+        'TwoWayPropagation', false);
+fs_tgt_rx = [phased.FreeSpace(...
+        'OperatingFrequency', fc, ...
+        'SampleRate', fs, ...
+        'PropagationSpeed', c, ...
+        'TwoWayPropagation', false)];
+
+fs_tx_tgts = cell(1, size(allTgtPos,2));
+fs_tgt_rxs = cell(1, size(allTgtPos,2));
+for idx = 1:size(allTgtPos,2)
+    fs_tx_tgts{idx} = phased.FreeSpace(...
+        'OperatingFrequency', fc, ...
+        'SampleRate', fs, ...
+        'PropagationSpeed', c, ...
+        'TwoWayPropagation', false);
+    fs_tgt_rxs{idx} = phased.FreeSpace(...
+        'OperatingFrequency', fc, ...
+        'SampleRate', fs, ...
+        'PropagationSpeed', c, ...
+        'TwoWayPropagation', false);
+end
 
 fs_direct = phased.FreeSpace(...
     'OperatingFrequency', fc, ...
     'SampleRate', fs, ...
     'PropagationSpeed', c, ...
     'TwoWayPropagation', false);
+
 numSamples = ceil(pri*fs);
 
 m_ref = matfile('ref_datacube.mat', 'Writable', true);
 m_ref.data(1,1:numSamples) = complex(zeros(1,numSamples));  % preallocate type
+
 m_sig = matfile('sig_datacube.mat', 'Writable', true);
 m_sig.data(1,1:numSamples) = complex(zeros(1,numSamples));  % preallocate type
+
 m_traj = matfile('traj_data.mat', 'Writable',true);
 m_traj.data(1,1:3) = zeros(1,3);
+
+ 
 
 % Precompute full waveform length needed
 samples_per_pulse = round(fs / prf);
 total_samples_needed = samples_per_pulse * pulse_num;
 
-% Make sure decoded data is long enough
-if length(data) < total_samples_needed
-    % Tile the data if needed
-    reps = ceil(total_samples_needed / length(data));
-    data = repmat(data, reps, 1);
-end
 
 
 
@@ -144,52 +161,55 @@ for idx = 1:pulse_num
      if mod(idx,10)==0
          fprintf("Pulse Number: %i\n", idx);
      end
-     % Extract consecutive chunk for this pulse
-    start_idx = (idx-1) * samples_per_pulse + 1;
-    end_idx   = start_idx + samples_per_pulse - 1;
-    test_sig  = data(start_idx:end_idx);
-%% Update positions
-txPos = txPos + pri*txVel;
-rxPos = rxPos + pri*rxVel;
-tgtPos = tgtPos + pri*tgtVel;
-m_traj.data(idx, 1:3)= [txPos(1) txPos(2) txPos(3)];
-%% Step 1 - Transmit
-tx_out = transmitter(test_sig);
+    test_sig  = data;
+    %% Update positions
+    txPos = txPos + pri*txVel;
+    rxPos = rxPos + pri*rxVel;
+    allTgtPos = allTgtPos + pri*tgtVels;
 
-%% Step 2 - Radiate toward target
-[~, aod_tgt] = rangeangle(tgtPos, txPos, Rtx);
-tx_radiated_tgt = radiator(tx_out, aod_tgt);
+    m_traj.data(idx, 1:3)= [txPos(1) txPos(2) txPos(3)];
 
-%% Step 3 - Propagate TX to target
-sig_at_tgt = fs_tx_tgt(tx_radiated_tgt, txPos, tgtPos, txVel, tgtVel);
+    %% Step 1 - Transmit
+    tx_out = transmitter(test_sig);
+    sigs_at_rx = zeros(size(allTgtPos,2), length(test_sig));
+    tgt_ang = zeros(2, size(allTgtPos,2));
 
-%% Step 4 - Apply RCS
-sig_reflected = sig_at_tgt * sqrt(rcsLinear);
+    for idx2 = 1:size(allTgtPos,2)
+        tgtPos = allTgtPos(:,idx2);
+        tgtVel = tgtVels(:,idx2);
+        fs_tx_tgt = fs_tx_tgts{1,idx2};
+        fs_tgt_rx = fs_tgt_rxs{1,idx2};
 
-%% Step 5 - Propagate target to RX
-sig_at_rx = fs_tgt_rx(sig_reflected, tgtPos, rxPos, tgtVel, rxVel);
+        %% Step 2 - Radiate toward target
+        [~, aod_tgt] = rangeangle(tgtPos, txPos, Rtx);
+        tx_radiated_tgt = radiator(tx_out, aod_tgt);
 
-%% Step 6 - Collect at RX
-[~, aoa_tgt] = rangeangle(tgtPos, rxPos, Rrx);
-sig_collected = collector(sig_at_rx, aoa_tgt);
+        %% Step 3 - Propagate TX to target
+        sig_at_tgt = fs_tx_tgt(tx_radiated_tgt, txPos, tgtPos, txVel, tgtVel);
 
-%% Step 7 - Apply receiver
-sig_final = receiver_out(sig_collected).';
+        % Apply rcs 
+        sig_reflected = sig_at_tgt * sqrt(rcsLinear(1 , idx2));
 
+        % Save signal
+        sigs_at_rx(idx2,:) = fs_tgt_rx(sig_reflected, tgtPos, rxPos, tgtVel, rxVel);
+        % Save angle 
+        [~, aoa_tgt] = rangeangle(tgtPos, rxPos, Rrx);
+        tgt_ang(:, idx2) = aoa_tgt;
+    end
+
+    % Calculate Direct Path
+    [~, aod_rx] = rangeangle(rxPos, txPos, Rtx);
+    tx_radiated_rx = radiator(tx_out, aod_rx);
+    sig_direct = fs_direct(tx_radiated_rx, txPos, rxPos, txVel, rxVel).';
+
+    sig_collected = collector([sigs_at_rx.', sig_direct.'], [tgt_ang,aod_rx]);
+    sig_final = receiver_out(sig_collected).';
+
+% Save Pulses
 m_sig.data(idx, 1:samples_per_pulse) = sig_final(1:samples_per_pulse);
-
-%% Step 8 - Direct path reference
-[~, aod_rx] = rangeangle(rxPos, txPos, Rtx);
-tx_radiated_rx = radiator(tx_out, aod_rx);
-sig_direct = fs_direct(tx_radiated_rx, txPos, rxPos, txVel, rxVel).';
-
 m_ref.data(idx, 1:samples_per_pulse) = sig_direct(1:samples_per_pulse);  % write one row at a time
 
-
-
-
-
-
+%% Debug
 if debug
     fprintf('\n=== Signal Chain ===\n');
     fprintf('Step 1 - TX output power:        %.1f dBW\n', mag2db(rms(tx_out)));
@@ -203,33 +223,33 @@ if debug
     fprintf('Step 6 - Collected signal:       %.1f dBW\n', mag2db(rms(sig_collected)));
     fprintf('Step 7 - Final signal:           %.1f dBW\n', mag2db(rms(sig_final)));
     fprintf('\n=== Reference Channel ===\n');
-fprintf('Direct path signal at RX:        %.1f dBW\n', mag2db(rms(sig_direct)));
-fprintf('=== Geometry ===\n');
-fprintf('TX pos:  [%.1f, %.1f, %.1f] m\n', txPos);
-fprintf('RX pos:  [%.1f, %.1f, %.1f] m\n', rxPos);
-fprintf('TGT pos: [%.1f, %.1f, %.1f] m\n', tgtPos);
-fprintf('TX-TGT range: %.1f m\n', norm(tgtPos - txPos));
-fprintf('RX-TGT range: %.1f m\n', norm(tgtPos - rxPos));
-fprintf("TX-RX range: %.1f m\n", norm(txPos-rxPos));
-% Verify bistatic range geometry
-c = physconst('LightSpeed');
-txPos = [0; 0; 500e3];
-rxPos = [0; 0; 0];
-tgtPos = [0; 200; 0];
+    fprintf('Direct path signal at RX:        %.1f dBW\n', mag2db(rms(sig_direct)));
+    fprintf('=== Geometry ===\n');
+    fprintf('TX pos:  [%.1f, %.1f, %.1f] m\n', txPos);
+    fprintf('RX pos:  [%.1f, %.1f, %.1f] m\n', rxPos);
+    fprintf('TGT pos: [%.1f, %.1f, %.1f] m\n', tgtPos);
+    fprintf('TX-TGT range: %.1f m\n', norm(tgtPos - txPos));
+    fprintf('RX-TGT range: %.1f m\n', norm(tgtPos - rxPos));
+    fprintf("TX-RX range: %.1f m\n", norm(txPos-rxPos));
+    % Verify bistatic range geometry
+    c = physconst('LightSpeed');
+    txPos = [0; 0; 500e3];
+    rxPos = [0; 0; 0];
+    tgtPos = [0; 200; 0];
 
-R_tx_tgt = norm(tgtPos - txPos);
-R_rx_tgt = norm(tgtPos - rxPos);
-R_tx_rx  = norm(rxPos  - txPos);
+    R_tx_tgt = norm(tgtPos - txPos);
+    R_rx_tgt = norm(tgtPos - rxPos);
+    R_tx_rx  = norm(rxPos  - txPos);
 
-r_bistatic = R_tx_tgt + R_rx_tgt - R_tx_rx;
+    r_bistatic = R_tx_tgt + R_rx_tgt - R_tx_rx;
 
-fprintf('R_tx_tgt:    %.4f m\n', R_tx_tgt);
-fprintf('R_rx_tgt:    %.4f m\n', R_rx_tgt);
-fprintf('R_tx_rx:     %.4f m\n', R_tx_rx);
-fprintf('r_bistatic:  %.4f m\n', r_bistatic);
-fprintf('Expected peak at sample offset: %.1f\n', r_bistatic * fs/c);
+    fprintf('R_tx_tgt:    %.4f m\n', R_tx_tgt);
+    fprintf('R_rx_tgt:    %.4f m\n', R_rx_tgt);
+    fprintf('R_tx_rx:     %.4f m\n', R_tx_rx);
+    fprintf('r_bistatic:  %.4f m\n', r_bistatic);
+    fprintf('Expected peak at sample offset: %.1f\n', r_bistatic * fs/c);
 end
-
+%%
 end
 
 %% Step 9 - Expected power budget
@@ -257,34 +277,5 @@ fprintf('Noise floor:      %.1f dBW\n', Pn_dBW);
 fprintf('Expected tgt SNR: %.1f dB\n', P_tgt_dBW - Pn_dBW);
 fclose('all');
 
-% %% Plot
-% sig_final = sum(sig_cube, 2);
-% sig_direct = sum(ref_cube, 2);
-% figure(1); clf;
-% t_axis = (0:numSamples-1)/fs * 1e3;
-% subplot(4,1,1)
-% plot(t_axis, abs(sig_final))
-% title('Target Return (after receiver)')
-% xlabel('Time (ms)'); ylabel('Amplitude'); grid on;
-% 
-% subplot(4,1,2)
-% plot(t_axis, abs(sig_direct))
-% title('Direct Path Reference')
-% xlabel('Time (ms)'); ylabel('Amplitude'); grid on;
-% 
-% subplot(4,1,3)
-% corr_ref = xcorr(sig_final, sig_direct);
-% corr_sig = xcorr(SSS_sequence, sig_direct);
-% range_ax = ((0:length(corr_sig)-1) - floor(length(corr_sig)/2)) * c/fs;
-% plot(range_ax, mag2db(abs(corr_ref)));
-% title('Cross Correlation (Range Profile)')
-% xlabel('Differential Range (m)'); ylabel('Magnitude (dB)'); grid on;
-% xlim([-1000 1000])
-% 
-% subplot(4,1,4)
-% corr_sig = xcorr(sig_direct, SSS_sequence);
-% range_ax = ((0:length(corr_sig)-1) - floor(length(corr_sig)/2)) * c/fs;
-% plot(range_ax, abs(corr_sig));
-% title('Cross Correlation (Range Profile)')
-% xlabel('Differential Range (m)'); ylabel('Magnitude (dB)'); grid on;
-% xlim([-1000 1000])
+
+

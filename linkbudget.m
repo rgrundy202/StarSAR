@@ -1,33 +1,21 @@
 
 
 kB          = 1.38e-23;
-Tn          = 300;
+Tn          = 290;
 f_c         = 10.7e9;
 c           = 3*10^8;
 lambda      = c/f_c;
-
 bw          = 240e6;
-
-f_s         = 2*bw;
-
+f_s         = bw;
 NF_lin      = 10^(1.4/10);
-
 L_lin       = 10^(6.0/10);
-
 Arx         = 1;
-
 R_orbit     = 500e3;
-
 R_target    = 1:1000;
-
 rcs_m2      = 100;
-
-EIRP        = 45;
-
+EIRP        = 45.1;
 pri         = 1/750;
-
 prf         = 750;
-
 speed       = 7.62e3;
 
 P_sig = db2pow(EIRP);
@@ -35,7 +23,7 @@ P_sig = db2pow(EIRP);
 
 
 % Total noise power over full bandwidth
-Pn_total    = kB * Tn * fs * NF_lin * L_lin;
+Pn_total    = kB * Tn * f_s * NF_lin*L_lin;
 
 Grx_dB  = 20;                        % your gain in dB
 Grx_lin = db2pow(Grx_dB);
@@ -49,8 +37,8 @@ sig_target = sig_ref * rcs_m2./( 4 * pi * R_target.^2);
 
 snr_target =  10*log10(sig_target/Pn_total);
 
+N_sync      = round(f_s*pri);
 
-N_sync      = round(f_s / (prf * 302));
 MF_gain_dB  = 10*log10(N_sync);
 fprintf('Range processing gain: %.1f dB\n', MF_gain_dB);
 
@@ -80,8 +68,11 @@ hold off
 figure(2)
 SNR_postprocs = snr_target + total_gain_dB;
 semilogx(R_target, SNR_postprocs);
+xlabel("Range (m)");
+ylabel("SNR (dB)");
+title("Processed SNR")
 hold on
-yline(12, ':', '12 dB', 'LineWidth', 1.5, 'LabelHorizontalAlignment', 'left');
+yline(12, ':', '12 dB', 'LineWidth', 1.5, 'LabelHorizontalAlignment', 'left', 'Color','red');
 hold off
 
 %calculate required rcs at 1.2 km

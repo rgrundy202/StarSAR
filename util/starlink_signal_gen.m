@@ -7,16 +7,6 @@ function [PSS, sss_ofdm_output, head_ofdm_output] = starlink_signal_gen(filename
 %%%%%%%%%%%%%%%%%% Values Taken From Humphrey %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     N = 1024; 
     N_g = 32;
-    T_f = 1/750;
-    T_fg = (68/15)*10^(-6);
-    N_sf = 302;
-    N_sfd = 298;
-    T = (64/15)*10^(-6);
-    T_g = (2/15)*10^(-6);
-    T_sym = 4.4E-6;
-    F = 234375;
-    F_sigma = 250E6;
-    F_g = 10E6;
     gutter_len = 4;
     F_s= 240E6;
     

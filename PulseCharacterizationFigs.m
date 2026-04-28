@@ -3,13 +3,24 @@ close all;
 addpath(fullfile(fileparts(mfilename('fullpath')), 'util'));
 T_f = 1/750;
 T_sym = T_f/303;
-
-[pss, sss, head] = starlink_signal_gen('faust.txt', 'output.data',3);
-f_s = length(pss)/T_sym;
+starlink_signal_gen("faust.txt", "output.data", 4);
+% Step 1 — decode raw bytes to complex IQ
 data = decode_starlink_signal('output.data');
-fprintf("Decoder done. Data length: %d\n", length(data));
+sim_rate = length(data)*750/3;
+% Step 2 — resample from known generation rate to simulation rate
+fs_gen = 240e6;   % whatever starlink_signal_gen uses
+fs_sim = 256e6;               % your simulation rate
+[P, Q] = rat(fs_sim / sim_rate);
+data = resample(data, P, Q);
 
-first_frame = data(1:length(data)/3);
+
+
+% Step 4 — verify spectrum looks clean
+figure();
+plot_fft(data, fs_sim);
+title('Resampled Starlink signal at simulation fs');
+
+first_frame = data(1:T_f*fs_sim);
 
 
 
@@ -21,24 +32,25 @@ xlabel("Time (s)")
 ylabel("Normalized Intensity (a.u.)")
 
 
-figure(2);
-cor = xcorr(pss);
-cor = cor/max(cor);
-time = linspace(-T_sym,T_sym, length(cor));
-semilogy(time, abs(cor))
-title("Autocorrelation of PSS")
-xlabel("Delay time (s)")
-ylabel("Normalized Intensity (a.u.)")
-drawnow;
+% figure(2);
+% cor = xcorr(pss);
+% cor = cor/max(cor);
+% time = linspace(-T_sym,T_sym, length(cor));
+% semilogy(time, abs(cor))
+% title("Autocorrelation of PSS")
+% xlabel("Delay time (s)")
+% ylabel("Normalized Intensity (a.u.)")
+% drawnow;
 
 figure(3)
 fftd = fft(first_frame);
 fftd = fftshift(fftd);
-freqs = linspace(-f_s/2, f_s/2, length(fftd));
-plot(freqs, abs(fftd));
+freqs = linspace(-fs_sim/2, fs_sim/2, length(fftd));
+fftd = fftd/max(abs(fftd));
+plot(freqs, mag2db(abs(fftd)));
 title("Frequency Spectrum for One Frame")
 xlabel("Frequency (Hz)")
-ylabel("")
+ylabel("Spectral Intensity (dB)")
 
 
 figure(4);
@@ -69,7 +81,7 @@ time = linspace(-T_f,T_f, length(cor));
 plot(time, cor);
 title("Autocorrelation of One Frame")
 xlabel("Delay time (s)")
-ylabel("Normalized Intensity (s)")
+ylabel("Normalized Intensity (dB)")
 
 figure(7)
 % Compute the matched filter output
@@ -90,45 +102,6 @@ semilogy(time, abs(corr))
 title("Cross Correlation of Three Frame Transmission with One Frame")
 xlabel("Delay Time (s)")
 ylabel("Normalized Intensity (a.u.)")
-
-% figure(9)
-% [afmag,delay,doppler] = ambgfun(sss, f_s, 750*303);
-% afmag = db(afmag);
-% afmag= max(afmag, -60);  % clamp to 60dB dynamic range
-% contour(delay, doppler, afmag)
-% colorbar
-% 
-% title("Radar Ambiguity for SSS Sequence");
-% xlabel("Delay Time (s)");
-% ylabel("Doppler Shift (Hz)");
-% 
-% figure(10)
-% delay = downsample(delay, 2);
-% doppler = downsample(doppler, 2);
-% afmag = downsample(downsample(afmag, 2).',2).';
-% 
-% h = surf(delay,doppler,afmag);
-% set(h,'LineStyle','none')
-% colorbar
-% 
-% title("Radar Ambiguity for SSS Sequence");
-% xlabel("Delay Time (s)");
-% ylabel("Doppler Shift (Hz)");
-% 
-% figure(11)
-% [response, lags] = xcorr(data, sss);
-% time = linspace(-(T_f+T_sym)/2, (T_f+T_sym)/2, length(response));
-% response = response/max(abs(response));
-% response = mag2db(abs(response));
-% response = max(response, -60);  % clamp to 60dB dynamic range
-% plot(lags/f_s, response)
-% xlim([-T_sym, (T_f+T_sym)/2]);
-% title("Matched Filter Response for SSS Sequence and Three Frame Signal")
-% xlabel("Time (s)")
-% ylabel("Response Intensity (a.u.)")
-% 
-
-
 
 
 
