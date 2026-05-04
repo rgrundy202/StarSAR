@@ -1,6 +1,6 @@
 %% Signal Analyzer
 close all;
-m = matfile('ref_datacube.mat');
+m = matfile('sig_datacube.mat');
 m_size = size(m, 'data');
 rows = m_size(1);
 col = m_size(2);
@@ -14,7 +14,8 @@ m_size = size(m, 'data');
 rows = m_size(1);
 col = m_size(2);
 
-figure()
+
+figure;
 imagesc(real(data));title('SAR Raw Data')
 xlabel('Cross-Range Samples')
 ylabel('Range Samples')
@@ -64,7 +65,7 @@ end
 %Plot
 sig_final = sig_output_array;
 sig_direct = ref_output_array;
-figure(1); clf;
+figure;
 t_axis = (0:numSamples-1)/fs * 1e3;
 subplot(4,1,1)
 plot(t_axis, abs(sig_final))

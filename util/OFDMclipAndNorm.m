@@ -1,4 +1,4 @@
-function out = OFDMclipAndNorm(ofdm_output)
+function out = OFDMclipAndNorm(ofdm_output, rms_theshold)
     % Helper method to solve PAPR issue from OFDM and keep average power
     % comparable between symbols. Clipping may cause distortion but data
     % recovery in this simulation is unimportant and this method produces
@@ -6,10 +6,10 @@ function out = OFDMclipAndNorm(ofdm_output)
     % al.
 
     % Clip
-    threshold = sqrt(2) * rms(ofdm_output);
+    threshold = rms_theshold * rms(ofdm_output);
     peaks = abs(ofdm_output) > threshold;
     ofdm_output(peaks) = threshold * exp(1j * angle(ofdm_output(peaks)));
 
     % Renormalize RMS after clipping
-    out = ofdm_output / max(ofdm_output);
+    out = ofdm_output / max(abs(ofdm_output));
 end

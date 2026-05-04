@@ -5,12 +5,13 @@ addpath(fullfile(fileparts(mfilename('fullpath')), 'util'));
 rng('default');
 delete 'ref_datacube.mat';
 delete 'sig_datacube.mat';
+delete 'downlink_wav.mat';
 debug = false;
 direct_interference = false;
 %% Parameters
 fc      = 10.7e9;
 bw      = 240e6;
-fs      = 256e6;
+fs      = 240e6;
 prf     = 750;
 pri     = 1/prf;
 [lambda, c] = freq2wavelen(fc);
@@ -19,8 +20,8 @@ rxGain_dB = 21;
 gainTx  = 34.0;
 EIRP    = 45.1;
 peakPower = 10^((EIRP - gainTx)/10);
-rcsLinear = [10e6, 10e6, 10e6];   % artificially high to force detection
-pulse_num = 100;
+rcsLinear = [10, 10, 10];   % artificially high to force detection
+pulse_num = 1000;
 
 %% Geometry
 r       = 500e3;                     % TX altitude (m)
@@ -76,13 +77,15 @@ transmitter  = phased.Transmitter(PeakPower=peakPower, Gain=gainTx, LossFactor=0
 receiver_out = phased.Receiver(Gain=rxGain_dB, SampleRate=fs, NoiseFigure=rx_Nf, SeedSource='Property');
 
 %% Generate test waveform (simple complex sinusoid for testing)
-data = decode_starlink_signal('output.data');
-fs_data = fs * length(data) / round(fs*pri*3);  % ≈ 15x fs
-fprintf('Estimated data sample rate: %.3f MHz\n', fs_data/1e6);
+[pss, sss, head, len] = starlink_signal_gen("faust.txt", 1);
 
+downlink_mat = matfile("downlink_wav.mat");
+data = downlink_mat.data;
+fs_data = round(fs * length(data) / (fs*pri*3));  
+fprintf('Estimated data sample rate: %.3f MHz\n', fs_data/1e6);
 [P, Q]  = rat(fs / fs_data);          % rational approximation of ratio
 data    = resample(data, P, Q);        % resample to simulation fs
-
+plot_fft(data, fs);
 fprintf('Resample Factor: %d\n', P/Q);
 fprintf('Resampled length: %d\n', length(data));
 fprintf('Expected length:  %d\n', round(fs * pri));

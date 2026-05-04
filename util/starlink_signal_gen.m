@@ -2,13 +2,14 @@
 % Taken from research done on Humphrey et al. (2023)
 
 
-function [PSS, sss_ofdm_output, head_ofdm_output] = starlink_signal_gen(filename, out_filename, oversample)
+function [PSS, sss_ofdm_output, head_ofdm_output, len] = starlink_signal_gen(filename, oversample)
     
 %%%%%%%%%%%%%%%%%% Values Taken From Humphrey %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     N = 1024; 
     N_g = 32;
     gutter_len = 4;
     F_s= 240E6;
+    T = 1/750;
     
 %%%%%%%%%%%%%%%%%%%%%% Environment Variables %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
    
@@ -22,12 +23,14 @@ function [PSS, sss_ofdm_output, head_ofdm_output] = starlink_signal_gen(filename
     cplen = N_g;
     nfft = n_streams+gutter_len; % length for fft. 
     num_frames = ceil(file_prop.bytes/max_bytes_per_frame);
-    
+    num_samples = F_s*num_frames*T;
+
     data_file = fopen(filename);
-    output_file = fopen(out_filename, 'w');
+    m_out = matfile('downlink_wav.mat', 'Writable', true);
+    m_out.data(1,1:num_samples) = complex(zeros(1,num_samples));  % preallocate type
     fprintf("Generating Signal File For %s.\n%d Frames of Data\n", filename, num_frames)
-
-
+    write_tracker = 1;
+    rms_clip_multiple = 5;
 
 
     
@@ -81,12 +84,13 @@ function [PSS, sss_ofdm_output, head_ofdm_output] = starlink_signal_gen(filename
     end 
     
     % Save cyclic prefix
-    cyclic_pre = q_pss(length(q_pss)- N_g+1:length(q_pss));
+    cyclic_pre = PSS_seq(length(pss_sub)- N_g+1:length(pss_sub));
+
     % Change rotation back for inversion
     rot = pi;
-    mod_prefix = dpskmod(cyclic_pre, M, rot);
+    %mod_prefix = dpskmod(cyclic_pre, M, rot);
 
-    PSS_seq = [mod_prefix, PSS_seq];
+    PSS_seq = [cyclic_pre, PSS_seq];
     
     
    
@@ -94,6 +98,7 @@ function [PSS, sss_ofdm_output, head_ofdm_output] = starlink_signal_gen(filename
     PSS = resample(PSS_seq, (symbol_length), length(PSS_seq));
     % Normalize
     PSS = PSS/max(abs(PSS));
+    PSS = zeros(1,length(PSS));
    
     
     
@@ -141,7 +146,7 @@ function [PSS, sss_ofdm_output, head_ofdm_output] = starlink_signal_gen(filename
         error("Bad SSS Symbol Length")
     end
     
-    sss_ofdm_output = OFDMclipAndNorm(ofdm_output);
+    sss_ofdm_output = OFDMclipAndNorm(ofdm_output, rms_clip_multiple);
     
 
     %% Header (i = 2-5) 4QAM
@@ -181,7 +186,7 @@ function [PSS, sss_ofdm_output, head_ofdm_output] = starlink_signal_gen(filename
         error("Bad Header Length")
     end
 
-    head_ofdm_output = OFDMclipAndNorm(ofdm_output);
+    head_ofdm_output = OFDMclipAndNorm(ofdm_output, rms_clip_multiple);
     
 
     
@@ -189,18 +194,26 @@ function [PSS, sss_ofdm_output, head_ofdm_output] = starlink_signal_gen(filename
     guard_data = zeros(1, symbol_length);
     
     for frame = 1:num_frames
-        frame_start = ftell(output_file);
+        
         %% Synchronization Pt 1.
         % PSS
         fprintf("PSS Sequence Length: %d \n", length(PSS));
-        write_iq(output_file, PSS);
+
+        m_out.data(1,write_tracker:write_tracker+length(PSS)-1) = PSS;
+        write_tracker=write_tracker+length(PSS);
+        
         fprintf("PSS non-zero elements: %d\n", nnz(PSS));
         % SSS
-        write_iq(output_file, sss_ofdm_output);
         fprintf("SSS Sequence Length: %d\n", length(sss_ofdm_output));
         fprintf("SSS non-zero elements: %d\n", nnz(sss_ofdm_output));
+        m_out.data(1,write_tracker:write_tracker+length(sss_ofdm_output)-1) = sss_ofdm_output.';
+        write_tracker=write_tracker+length(sss_ofdm_output);
+        
+        
         % Header
-        write_iq(output_file, head_ofdm_output);
+        m_out.data(1,write_tracker:write_tracker+length(head_ofdm_output)-1) = head_ofdm_output.';
+        write_tracker=write_tracker+length(head_ofdm_output);
+        
         fprintf("Header Sequence Length: %d\n", length(head_ofdm_output));
 
         %% Data Generation and Writing
@@ -214,9 +227,13 @@ function [PSS, sss_ofdm_output, head_ofdm_output] = starlink_signal_gen(filename
             data = resize(data, max_hex_16qam*nSym, FillValue=15);
         end
         ofdm_input = reshape(data, [N, nSym]);
+        
         ofdm_output = ofdmmod(ofdm_input, nfft, cplen, nullIdx, OversamplingFactor=oversample);
-        ofdm_output = OFDMclipAndNorm(ofdm_output);
-        write_iq(output_file, ofdm_output);
+        ofdm_output = OFDMclipAndNorm(ofdm_output, rms_clip_multiple);
+        m_out.data(1,write_tracker:write_tracker+length(ofdm_output)-1) = ofdm_output.';
+        write_tracker=write_tracker+length(ofdm_output);
+        
+        
 
         % 4QAM (i = 13-298)
         M = 4;
@@ -230,9 +247,13 @@ function [PSS, sss_ofdm_output, head_ofdm_output] = starlink_signal_gen(filename
         data = qammod(data, M);
     
         ofdm_input = reshape(data, [N, nSym]);
+          
         ofdm_output = ofdmmod(ofdm_input, nfft, cplen, nullIdx, OversamplingFactor=oversample);
-        ofdm_output = OFDMclipAndNorm(ofdm_output);
-        write_iq(output_file, ofdm_output);
+        ofdm_output = OFDMclipAndNorm(ofdm_output, rms_clip_multiple);
+        m_out.data(1,write_tracker:write_tracker+length(ofdm_output)-1) = ofdm_output.';
+        write_tracker=write_tracker+length(ofdm_output);
+        
+        
         fprintf("Data Sequence Length: %d\n", length(ofdm_output));
 
         %% Synchronization pt 2
@@ -242,30 +263,34 @@ function [PSS, sss_ofdm_output, head_ofdm_output] = starlink_signal_gen(filename
         ofdm_input = qammod(data, M);
         ofdm_output = ofdmmod(ofdm_input, nfft, cplen, nullIdx, OversamplingFactor=oversample);
         % Normalized
-        ofdm_output = OFDMclipAndNorm(ofdm_output);
-    
-        write_iq(output_file, ofdm_output);
+        ofdm_output = OFDMclipAndNorm(ofdm_output, rms_clip_multiple);
+        m_out.data(1,write_tracker:write_tracker+length(ofdm_output)-1) = ofdm_output.';
+        write_tracker=write_tracker+length(ofdm_output);
+       
         fprintf("CM1SS Sequence Length: %d\n", length(ofdm_output));
 
         % CSS (i = 300)
         M = 4;
         data = randi([0 M-1], n_streams, 1);
         ofdm_input = qammod(data, M);
-    
         ofdm_output = ofdmmod(ofdm_input, nfft, cplen, nullIdx, OversamplingFactor=oversample);
         % Normalized
-        ofdm_output = OFDMclipAndNorm(ofdm_output);
-        write_iq(output_file, ofdm_output);
+        ofdm_output = OFDMclipAndNorm(ofdm_output, rms_clip_multiple);
+        m_out.data(1,write_tracker:write_tracker+length(ofdm_output)-1) = ofdm_output.';
+        write_tracker=write_tracker+length(ofdm_output);
+        
         fprintf("CSS Sequence Length: %d\n", length(ofdm_output));
 
         %% Frequency Guard
-
-        write_iq(output_file, guard_data);
+        m_out.data(1,write_tracker:write_tracker+length(guard_data)-1) = guard_data;
+        write_tracker=write_tracker+length(guard_data);
+        
         fprintf("Guard Sequence Length: %d\n", length(data));
 
-        bytes_written = ftell(output_file) - frame_start;
-        fprintf("Frame %d Complete. %d Bytes Written\n",frame, bytes_written);
+        
+        fprintf("Frame %d Complete. %d Time Steps Written\n",frame, write_tracker);
     end 
+    len = write_tracker;
 end
 
 
