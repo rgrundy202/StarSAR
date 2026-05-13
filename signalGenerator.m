@@ -20,8 +20,8 @@ rxGain_dB = 21;
 gainTx  = 34.0;
 EIRP    = 45.1;
 peakPower = 10^((EIRP - gainTx)/10);
-rcsLinear = [10, 10, 10];   % artificially high to force detection
-pulse_num = 1000;
+rcsLinear = [10e6, 10e6, 10e6];   % artificially high to force detection
+pulse_num = 100;
 
 %% Geometry
 r       = 500e3;                     % TX altitude (m)
@@ -85,7 +85,7 @@ fs_data = round(fs * length(data) / (fs*pri*3));
 fprintf('Estimated data sample rate: %.3f MHz\n', fs_data/1e6);
 [P, Q]  = rat(fs / fs_data);          % rational approximation of ratio
 data    = resample(data, P, Q);        % resample to simulation fs
-plot_fft(data, fs);
+
 fprintf('Resample Factor: %d\n', P/Q);
 fprintf('Resampled length: %d\n', length(data));
 fprintf('Expected length:  %d\n', round(fs * pri));
@@ -111,11 +111,11 @@ fs_tx_tgt = phased.FreeSpace(...
         'SampleRate', fs, ...
         'PropagationSpeed', c, ...
         'TwoWayPropagation', false);
-fs_tgt_rx = [phased.FreeSpace(...
+fs_tgt_rx = phased.FreeSpace(...
         'OperatingFrequency', fc, ...
         'SampleRate', fs, ...
         'PropagationSpeed', c, ...
-        'TwoWayPropagation', false)];
+        'TwoWayPropagation', false);
 
 fs_tx_tgts = cell(1, size(allTgtPos,2));
 fs_tgt_rxs = cell(1, size(allTgtPos,2));
@@ -203,7 +203,7 @@ for idx = 1:pulse_num
     % Calculate Direct Path
     [~, aod_rx] = rangeangle(rxPos, txPos, Rtx);
     tx_radiated_rx = radiator(tx_out, aod_rx);
-    sig_direct = fs_direct(tx_radiated_rx, txPos, rxPos, txVel, rxVel).';
+    sig_direct = fs_direct(tx_radiated_rx, txPos, rxPos, [0;0;0], rxVel).';
 
     sig_collected = collector([sigs_at_rx.', sig_direct.'], [tgt_ang,aod_rx]);
     sig_final = receiver_out(sig_collected).';

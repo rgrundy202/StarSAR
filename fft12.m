@@ -1,9 +1,10 @@
 delete downlink_wav.mat;
-over = 1;
+over = 4;
 [pss, sss, head, len] = starlink_signal_gen("faust.txt", over);
 load('downlink_wav.mat');
-len = length(data)/3;
-data1 = data(1:len);
+
+len = len/3;
+data1 = data(len:2*len-1);
 t = linspace(0, 1/750, len);
 figure;
 plot(t, abs(data1))
@@ -27,16 +28,25 @@ xline(-120, 'r--', '-120 MHz');
 xline(120, 'r--', '+120 MHz');
 
 figure;
+caf_in = [pss, sss.'];
 corr = xcorr(data1);
-t = linspace(-1/750, 1/750, 2*len-1);
+t = linspace(-1/(750), 1/(750), length(corr));
 t = t*3e8;
+
 
 %corr = mag2db(abs(corr));
 corr = abs(corr);
 corr = corr/max(corr);
 corr = mag2db(abs(corr));
 plot(t, corr)
-xlim([-6000, 6000])
+xlim([-3000, 3000])
 xlabel("Distance");
 ylabel("Intensity (dB)");
+
+
+figure;
+caf_in = [pss, sss.'];
+[caf, delay, doppler] = ambgfun(sss, fs, 750*303);
+surf(delay, doppler, caf);
+
 

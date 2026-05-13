@@ -30,7 +30,7 @@ function [PSS, sss_ofdm_output, head_ofdm_output, len] = starlink_signal_gen(fil
     m_out.data(1,1:num_samples) = complex(zeros(1,num_samples));  % preallocate type
     fprintf("Generating Signal File For %s.\n%d Frames of Data\n", filename, num_frames)
     write_tracker = 1;
-    rms_clip_multiple = 5;
+    rms_clip_multiple = 100000;
 
 
     
@@ -91,14 +91,17 @@ function [PSS, sss_ofdm_output, head_ofdm_output, len] = starlink_signal_gen(fil
     %mod_prefix = dpskmod(cyclic_pre, M, rot);
 
     PSS_seq = [cyclic_pre, PSS_seq];
-    
+    PSS_seq = PSS_seq(:).';                              % force row
+    PSS_padded = [PSS_seq, zeros(1, max(0, symbol_length/oversample - numel(PSS_seq)))];
+    PSS_padded = PSS_padded(1:symbol_length/oversample);            % truncates if needed
+
     
    
     % Stretch out to match other frames
-    PSS = resample(PSS_seq, (symbol_length), length(PSS_seq));
+    PSS = resample(PSS_padded, (symbol_length), length(PSS_padded));
     % Normalize
     PSS = PSS/max(abs(PSS));
-    PSS = zeros(1,length(PSS));
+    
    
     
     
@@ -187,7 +190,13 @@ function [PSS, sss_ofdm_output, head_ofdm_output, len] = starlink_signal_gen(fil
     end
 
     head_ofdm_output = OFDMclipAndNorm(ofdm_output, rms_clip_multiple);
-    
+
+    M = 4;
+    data = randi([0 M-1], n_streams, 1);
+    ofdm_input = qammod(data, M);
+    ofdm_output = ofdmmod(ofdm_input, nfft, cplen, nullIdx, OversamplingFactor=oversample);
+    % Normalized
+    css_ofdm_output = OFDMclipAndNorm(ofdm_output, rms_clip_multiple);
 
     
     % Frequency Guard (i = 301)
@@ -270,14 +279,9 @@ function [PSS, sss_ofdm_output, head_ofdm_output, len] = starlink_signal_gen(fil
         fprintf("CM1SS Sequence Length: %d\n", length(ofdm_output));
 
         % CSS (i = 300)
-        M = 4;
-        data = randi([0 M-1], n_streams, 1);
-        ofdm_input = qammod(data, M);
-        ofdm_output = ofdmmod(ofdm_input, nfft, cplen, nullIdx, OversamplingFactor=oversample);
-        % Normalized
-        ofdm_output = OFDMclipAndNorm(ofdm_output, rms_clip_multiple);
-        m_out.data(1,write_tracker:write_tracker+length(ofdm_output)-1) = ofdm_output.';
-        write_tracker=write_tracker+length(ofdm_output);
+        
+        m_out.data(1,write_tracker:write_tracker+length(css_ofdm_output)-1) = css_ofdm_output.';
+        write_tracker=write_tracker+length(css_ofdm_output);
         
         fprintf("CSS Sequence Length: %d\n", length(ofdm_output));
 

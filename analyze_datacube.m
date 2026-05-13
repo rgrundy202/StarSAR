@@ -70,7 +70,7 @@ for i = 2:num_pulses  % start at 2 to skip FreeSpace transient
     x_s = m_sig.data(i, :);
     
     % Simple cross-correlation range compression — no sub-framing needed
-    x_s_clean = eca(x_s, x_r, 5); 
+    x_s_clean = x_s; %eca(x_s, x_r, 5); 
 
     % Range compression on cleaned signal
     correlation = xcorr(x_s_clean, x_r);
@@ -99,10 +99,8 @@ for i = 2:num_pulses  % start at 2 to skip FreeSpace transient
                           range_profile, ...
                           sample_idx(valid));
     
-    % Back projection phase and coherent accumulation
-    delta_r_b = r_b - r_b_ref_mid;  % reference to aperture midpoint
-    phi = 2*pi * delta_r_b / lambda;
-    sar_image = sar_image + (vals .* exp(1j * phi)).';
+
+    sar_image = sar_image + vals.';
 end
 
 %% Reshape back to image grid
